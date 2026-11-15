@@ -75,11 +75,13 @@ def score_signals(df: pd.DataFrame) -> pd.DataFrame:
     X_scaled = scaler.transform(X)
 
     detector = IsolationForest(
-        n_estimators=240,
+        n_estimators=100,
         contamination="auto",
         max_samples="auto",
         random_state=42,
-        n_jobs=-1
+        # Streamlit Community Cloud runs in a constrained container; avoid
+        # spawning every available CPU worker, which can stall startup.
+        n_jobs=1
     )
     detector.fit(X_scaled[train_mask])
     raw_anomaly = -detector.score_samples(X_scaled)

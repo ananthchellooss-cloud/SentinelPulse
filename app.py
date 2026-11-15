@@ -37,23 +37,35 @@ with st.sidebar:
     st.divider()
     st.caption("Data provenance is shown in the dashboard. Synthetic operational records are not real patient or worker data.")
 
-@st.cache_data(ttl=1800, show_spinner="Loading data and running the intelligence engine…")
+@st.cache_data(ttl=1800, show_spinner=False)
 def load(days, live, live_forecast_enabled):
+    # Keep each stage bounded and independent so the core dashboard can still
+    # initialize when an optional external forecast service is unavailable.
     df, provenance = get_demo_data(days, live)
     scored = score_signals(df)
     forecasted, model_info = add_forecast(scored)
     heat_outlook, key_horizons = build_heat_risk_outlook(scored, horizons=(6, 24))
     if live_forecast_enabled:
-        live_weather, live_weather_errors = get_live_weather_forecast(forecast_hours=24)
-        live_outlook = score_live_weather_outlook(live_weather, scored) if not live_weather.empty else pd.DataFrame()
+        try:
+            live_weather, live_weather_errors = get_live_weather_forecast(forecast_hours=24)
+            live_outlook = score_live_weather_outlook(live_weather, scored) if not live_weather.empty else pd.DataFrame()
+        except Exception as exc:
+            live_weather, live_weather_errors, live_outlook = pd.DataFrame(), [str(exc)], pd.DataFrame()
     else:
         live_weather, live_weather_errors, live_outlook = pd.DataFrame(), [], pd.DataFrame()
     return forecasted, provenance, model_info, heat_outlook, key_horizons, live_outlook, live_weather_errors
 
 try:
-    data, provenance, model_info, heat_outlook, key_horizons, live_outlook, live_weather_errors = load(days, live, live_forecast_enabled)
+    with st.status("Initializing SentinelPulse intelligence engine…", expanded=True) as init_status:
+        st.write("Preparing synthetic environmental and workplace dataset…")
+        # The cached loader is intentionally kept as one unit; this message
+        # confirms the app reached model initialization rather than a blank page.
+        st.write("Running anomaly detection, risk fusion and predictive models…")
+        data, provenance, model_info, heat_outlook, key_horizons, live_outlook, live_weather_errors = load(days, live, live_forecast_enabled)
+        init_status.update(label="SentinelPulse is ready", state="complete", expanded=False)
 except Exception as e:
-    st.error(f"Unable to initialize the demonstration: {e}")
+    st.error(f"Unable to initialize the demonstration: {type(e).__name__}: {e}")
+    st.exception(e)
     st.stop()
 
 st.caption(f"**Data provenance:** {provenance}  |  **Model:** Isolation Forest + gradient-boosting service forecast")
